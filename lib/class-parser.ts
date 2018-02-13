@@ -9,13 +9,113 @@ const chars = {
     COMMA: ',',
     MINUS: '-',
     SLASH: '/',
-    DOLLAR: '$'
+    DOLLAR: '$',
 };
 
-function parse(raw, options) {
-    var
-        currentPosition = 0,
-        assert = function (bool, msg) {
+interface Options {
+    translations?: {
+        [key: string]: string;
+    }
+}
+
+export const parse = function (raw: string, options?: Options): any {
+    let currentPosition: number = 0;
+    let current = function (): string {
+        return raw[currentPosition] || '';
+    };
+    let translateString = function(string: string): string {
+        if(typeof options.translations === "object") {
+            return options.translations.hasOwnProperty(string) ?
+                options.translations[string] : string;
+        }
+
+        return string;
+    };
+    let indexOfOrMaxInt = function (str: string, fromPos: number) {
+        const pos = this.indexOf(str, fromPos);
+        return pos === -1 ? Infinity : pos;
+    };
+    let parseArray = function (): any[] {
+        const result = [];
+        assert(current() === chars.CURLY_OPEN);
+        next();
+        parseWhitespace();
+        while (current() !== chars.CURLY_CLOSE) {
+            result.push(parsePropertyValue());
+            parseWhitespace();
+            if (current() === chars.COMMA) {
+                next();
+                parseWhitespace();
+            } else {
+                break;
+            }
+
+        }
+        next();
+        return result;
+    };
+    let parseProperty = function (context): any {
+        let name = parsePropertyName(),
+            value;
+
+        parseWhitespace();
+
+        if (name === 'class') {
+            name = parsePropertyName();
+            parseWhitespace();
+            if (current() === ':') {
+                next();
+                parseWhitespace();
+                parsePropertyName();
+                parseWhitespace();
+            }
+        }
+
+        switch (current()) {
+            case chars.SQUARE_OPEN:
+                assert(next() === chars.SQUARE_CLOSE);
+                next();
+                parseWhitespace();
+                assert(current() === chars.EQUALS);
+                next();
+                parseWhitespace();
+                value = parseArray();
+                break;
+            case chars.EQUALS:
+                next();
+                parseWhitespace();
+                value = parsePropertyValue();
+                break;
+            case chars.CURLY_OPEN:
+                value = parseClassValue();
+                break;
+            case chars.SLASH:
+                if (next() === chars.SLASH) {
+                    currentPosition = raw.indexOf('\n', currentPosition);
+                    break;
+                }
+                throw new Error('unexpected value at post ' + currentPosition);
+            case chars.DOLLAR:
+                result = parseTranslationString();
+                break;
+            default:
+                throw new Error('unexpected value at pos ' + currentPosition);
+        }
+
+        context[name] = value;
+        parseWhitespace();
+        assert(current() === chars.SEMICOLON);
+        next();
+    };
+    let parseWhitespace = function (): void {
+        while (
+        (' \t\r\n'.indexOf(raw[currentPosition]) !== -1) ||
+        (raw.charCodeAt(currentPosition) < 32)
+            ) {
+            next();
+        }
+    };
+    let assert = function(bool: boolean, msg: string = ''): void {
             if (bool) {
                 return;
             }
@@ -25,37 +125,34 @@ function parse(raw, options) {
                 'after: ' + JSON.stringify(raw.substr(currentPosition, 40))
             );
         },
-        detectLineComment = function () {
-            var indexOfLinefeed;
+        detectLineComment = function(): void {
+            let indexOfLinefeed;
             if (current() === chars.SLASH && raw[currentPosition + 1] === chars.SLASH) {
                 indexOfLinefeed = raw.indexOf('\n', currentPosition);
                 currentPosition = indexOfLinefeed === -1 ? raw.length : indexOfLinefeed;
             }
         },
-        next = function () {
+        next = function(): string {
             currentPosition += 1;
             detectLineComment();
             return current();
         },
-        nextWithoutCommentDetection = function () {
+        nextWithoutCommentDetection = function(): string {
             currentPosition += 1;
             return current();
         },
-        current = function () {
-            return raw[currentPosition];
-        },
         result = {},
-        weHaveADoubleQuote = function () {
+        weHaveADoubleQuote = function(): boolean {
             return (raw.substr(currentPosition, 2).indexOf('""') === 0);
         },
-        weHaveAStringLineBreak = function () {
+        weHaveAStringLineBreak = function(): boolean {
             return raw.substr(currentPosition, 6).indexOf('" \\n "') === 0;
         },
-        forwardToNextQuote = function () {
+        forwardToNextQuote = function(): void {
             currentPosition = indexOfOrMaxInt.call(raw, chars.QUOTE, currentPosition + 1);
         },
-        parseString = function () {
-            var result = '';
+        parseString = function(): any {
+            let result = '';
             assert(current() === chars.QUOTE);
             nextWithoutCommentDetection();
             while (true) {
@@ -77,8 +174,8 @@ function parse(raw, options) {
             nextWithoutCommentDetection();
             return result;
         },
-        parseTranslationString = function() {
-            var result = '';
+        parseTranslationString = function(): string {
+            let result: string = '';
             assert(current() === chars.DOLLAR);
             next();
             assert(
@@ -103,15 +200,7 @@ function parse(raw, options) {
 
             return translateString(result);
         },
-        translateString = function(string) {
-            if(typeof options.translations === "object") {
-                return options.translations.hasOwnProperty(string) ?
-                    options.translations[string] : string;
-            }
-
-            return string;
-        },
-        parseNumber = function (str) {
+        parseNumber = function(str): number {
             str = str.trim();
             if (str.substr(0, 2) === '0x') {
                 return parseInt(str);
@@ -121,27 +210,22 @@ function parse(raw, options) {
             }
             throw new Error('not a number: ' + str);
         },
-        indexOfOrMaxInt = function (str, fromPos) {
-            var pos = this.indexOf(str, fromPos);
-            return pos === -1 ? Infinity : pos;
-        },
-        parseMathExpression = function () {
-            var
-                posOfExpressionEnd = Math.min(
-                    indexOfOrMaxInt.call(raw, chars.SEMICOLON, currentPosition),
-                    indexOfOrMaxInt.call(raw, chars.CURLY_CLOSE, currentPosition),
-                    indexOfOrMaxInt.call(raw, chars.COMMA, currentPosition)
+        parseMathExpression = function() {
+            const posOfExpressionEnd = Math.min(
+                indexOfOrMaxInt.call(raw, chars.SEMICOLON, currentPosition),
+                indexOfOrMaxInt.call(raw, chars.CURLY_CLOSE, currentPosition),
+                indexOfOrMaxInt.call(raw, chars.COMMA, currentPosition)
                 ),
                 expression = raw.substr(currentPosition, posOfExpressionEnd - currentPosition);
             assert(posOfExpressionEnd !== Infinity);
             currentPosition = posOfExpressionEnd;
 
             // DONT LOOK, IT HURTS
-            return expression.split('+').map(parseNumber).reduce(function (prev, cur) {
+            return expression.split('+').map(parseNumber).reduce(function(prev, cur) {
                 return prev + cur;
             }, 0);
         },
-        parsePropertyValue = function () {
+        parsePropertyValue = function(): any {
             let result;
 
             if (current() === chars.CURLY_OPEN) {
@@ -156,27 +240,27 @@ function parse(raw, options) {
             return result;
 
         },
-        isValidVarnameChar = function (char) {
+        isValidVarnameChar = function(char): boolean {
             return (char >= '0' && char <= '9') ||
                 (char >= 'A' && char <= 'Z') ||
                 (char >= 'a' && char <= 'z') ||
                 char === '_';
         },
-        parsePropertyName = function () {
-            var result = current();
+        parsePropertyName = function(): string {
+            let result = current();
             while (isValidVarnameChar(next())) {
                 result += current();
             }
             return result;
         },
-        parseClassValue = function () {
-            var result = {};
+        parseClassValue = function(): any {
+            const result = {};
 
             assert(current() === chars.CURLY_OPEN);
             next();
             parseWhitespace();
 
-            while(current() !== chars.CURLY_CLOSE) {
+            while (current() !== chars.CURLY_CLOSE) {
 
                 parseProperty(result);
                 parseWhitespace();
@@ -185,87 +269,6 @@ function parse(raw, options) {
             next();
 
             return result;
-        },
-        parseArray = function () {
-            var result = [];
-            assert(current() === chars.CURLY_OPEN);
-            next();
-            parseWhitespace();
-            while (current() !== chars.CURLY_CLOSE) {
-                result.push(parsePropertyValue());
-                parseWhitespace();
-                if (current() === chars.COMMA) {
-                    next();
-                    parseWhitespace();
-                } else {
-                    break;
-                }
-
-            }
-            next();
-            return result;
-        },
-        parseProperty = function (context) {
-            var
-                name = parsePropertyName(),
-                value;
-
-            parseWhitespace();
-
-            if (name === 'class') {
-                name = parsePropertyName();
-                parseWhitespace();
-                if (current() === ':') {
-                    next();
-                    parseWhitespace();
-                    parsePropertyName();
-                    parseWhitespace();
-                }
-            }
-
-            switch (current()) {
-                case chars.SQUARE_OPEN:
-                    assert(next() === chars.SQUARE_CLOSE);
-                    next();
-                    parseWhitespace();
-                    assert(current() === chars.EQUALS);
-                    next();
-                    parseWhitespace();
-                    value = parseArray();
-                    break;
-                case chars.EQUALS:
-                    next();
-                    parseWhitespace();
-                    value = parsePropertyValue();
-                    break;
-                case chars.CURLY_OPEN:
-                    value = parseClassValue();
-                    break;
-                case chars.SLASH:
-                    if (next() === chars.SLASH) {
-                        currentPosition = raw.indexOf('\n', currentPosition);
-                        break;
-                    }
-                    throw new Error('unexpected value at post ' + currentPosition);
-                case chars.DOLLAR:
-                    result = parseTranslationString();
-                    break;
-                default:
-                    throw new Error('unexpected value at pos ' + currentPosition);
-            }
-
-            context[name] = value;
-            parseWhitespace();
-            assert(current() === chars.SEMICOLON);
-            next();
-        },
-        parseWhitespace = function () {
-            while (
-            (' \t\r\n'.indexOf(raw[currentPosition]) !== -1) ||
-            (raw.charCodeAt(currentPosition) < 32)
-                ) {
-                next();
-            }
         };
 
     options = options || {};
@@ -283,5 +286,4 @@ function parse(raw, options) {
     }
 
     return result;
-}
-module.exports = parse;
+};
