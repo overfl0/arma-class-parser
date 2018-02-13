@@ -13,16 +13,19 @@
     "class-parser.js"
   ],
   "main": "class-parser",
-  "dependencies": {},
+  "dependencies": {
+    "@types/jest": "^22.1.1"
+  },
   "repository": {
     "type": "git",
     "url": "http://github.com/fusselwurm/arma-class-parser.git"
   },
   "devDependencies": {
+    "@types/node": "^8.0.0",
     "jest": "^22.1.4",
     "typescript": "^2.6.2"
   },
   "scripts": {
-    "test": "node_modules/.bin/jest"	  
+    "test": "node_modules/.bin/jest"
   }
 }
